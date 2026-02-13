@@ -98,10 +98,10 @@ export default function ProductCarousel() {
           </div>
         </div>
 
-        {/* Scroll container */}
+        {/* Scroll container — fixed height to prevent layout shift when filtering */}
         <div
           ref={scrollRef}
-          className="scroll-x flex gap-5 pb-4"
+          className="scroll-x flex gap-5 py-2 -my-2 min-h-[536px]"
         >
           {filtered.map((product) => (
             <ProductCard key={product.id} product={product} />

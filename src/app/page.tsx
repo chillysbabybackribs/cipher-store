@@ -1,6 +1,7 @@
 import Header from "@/components/Header";
 import Hero from "@/components/Hero";
 import ProductCarousel from "@/components/ProductCarousel";
+import Documentation from "@/components/Documentation";
 import Footer from "@/components/Footer";
 
 export default function Home() {
@@ -15,6 +16,12 @@ export default function Home() {
       </div>
 
       <ProductCarousel />
+
+      {/* Documentation */}
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="border-t border-border" />
+      </div>
+      <Documentation />
 
       {/* Enterprise CTA section */}
       <section id="enterprise" className="py-20 px-6">

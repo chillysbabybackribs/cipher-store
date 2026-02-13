@@ -1,0 +1,396 @@
+================================================================================
+                         STRIPE INTEGRATION ARCHITECTURE
+================================================================================
+
+USER INTERFACE FLOW
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          LANDING PAGE / WEBSITE                             │
+│                                                                              │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐          │
+│  │   Research       │  │  Healthcare      │  │    Legal         │          │
+│  │   Agent          │  │   Agent          │  │    Agent         │          │
+│  │   $299           │  │   $499           │  │    $499          │          │
+│  │                  │  │                  │  │                  │          │
+│  │ [Get Started] ◄──┼──┼─→ [Get Started] ◄──┼─→ [Get Started]   │          │
+│  │ (CheckoutBtn)    │  │ (CheckoutBtn)    │  │ (CheckoutBtn)    │          │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘          │
+│                                                                              │
+│  ┌──────────────────┐  ┌──────────────────┐                                │
+│  │   Real Estate    │  │   Bundle         │                                │
+│  │   Agent          │  │   (All 4)        │                                │
+│  │   $399           │  │   $999           │                                │
+│  │                  │  │                  │                                │
+│  │ [Get Started]    │  │ [Get Started]    │                                │
+│  │ (CheckoutBtn)    │  │ (CheckoutBtn)    │                                │
+│  └──────────────────┘  └──────────────────┘                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+                            User clicks "Get Started"
+                                      ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        EMAIL PROMPT (BROWSER)                               │
+│                                                                              │
+│  ┌───────────────────────────────────────────────────────┐                 │
+│  │ Enter your email to get started:                      │                 │
+│  │                                                       │                 │
+│  │ [user@example.com_________________________]           │                 │
+│  │                                                       │                 │
+│  │              [OK]      [Cancel]                       │                 │
+│  └───────────────────────────────────────────────────────┘                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+                            POST /api/checkout
+                                      ↓
+================================================================================
+
+BACKEND REQUEST FLOW
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CHECKOUT ENDPOINT                                   │
+│                      POST /api/checkout/route.ts                            │
+│                                                                              │
+│  Request: { productId, email, customerName }                               │
+│                                                                              │
+│  ✓ Validate inputs                                                          │
+│  ✓ Look up product (research, healthcare, legal, realestate, bundle)       │
+│  ✓ Create Stripe Checkout Session (amount, customer_email, metadata)       │
+│  ✓ Save Order to database:                                                  │
+│    ├─ id: unique ID                                                         │
+│    ├─ stripeSessionId: session from Stripe                                  │
+│    ├─ email: customer email                                                 │
+│    ├─ product: "Healthcare AI Agent"                                        │
+│    ├─ price: 49900 (in cents)                                               │
+│    ├─ status: "pending"                                                     │
+│    └─ createdAt: current timestamp                                          │
+│                                                                              │
+│  Response: { sessionId, orderId, url }                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     STRIPE CHECKOUT (HOSTED)                                │
+│                       https://checkout.stripe.com/                          │
+│                                                                              │
+│  User enters:                                                                │
+│  ├─ Card number: 4242 4242 4242 4242 (test)                                │
+│  ├─ Expiry: 12/26 (any future date)                                        │
+│  ├─ CVC: 123 (any 3 digits)                                                │
+│  ├─ Name: John Doe (any name)                                              │
+│  └─ [Pay $XXX.00] button                                                   │
+│                                                                              │
+│  Stripe processes payment                                                   │
+│  Status: SUCCESS or FAILED                                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+                        [IF PAYMENT SUCCESSFUL]
+                                      ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    STRIPE WEBHOOK EVENT                                     │
+│                   Event: checkout.session.completed                         │
+│                       (from Stripe servers)                                 │
+│                                                                              │
+│  Stripe calls: POST /api/webhooks/stripe                                   │
+│  Headers: stripe-signature: ...                                             │
+│  Body: { id, type, data { object { id, ... } } }                           │
+│                                                                              │
+│  This runs asynchronously (independent of user flow)                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      WEBHOOK HANDLER                                        │
+│                  /api/webhooks/stripe/route.ts                              │
+│                                                                              │
+│  ✓ Extract webhook signature from headers                                   │
+│  ✓ Verify signature using STRIPE_WEBHOOK_SECRET                             │
+│    └─ If verification fails: REJECT and return 400                          │
+│  ✓ Parse webhook body                                                       │
+│  ✓ Log event to webhook_logs table (for audit trail)                       │
+│                                                                              │
+│  IF event type = "checkout.session.completed":                              │
+│    ├─ Extract session.id and session.payment_intent                         │
+│    ├─ Find order in database where stripeSessionId = session.id             │
+│    │                                                                         │
+│    ├─ Generate License Key:                                                 │
+│    │  └─ Format: PRODUCT-RANDOM-TIMESTAMP-CHECKSUM                         │
+│    │  └─ Example: HEALTHCARE-A9F2E1D8-2T5K6J-3K2J                          │
+│    │  └─ Crypto secure, unique per order                                    │
+│    │                                                                         │
+│    ├─ Update Order in database:                                             │
+│    │  ├─ status: "completed"                                                │
+│    │  ├─ licenseKey: generated key                                          │
+│    │  ├─ stripePaymentId: payment intent ID                                 │
+│    │  └─ updatedAt: current timestamp                                       │
+│    │                                                                         │
+│    └─ Send License Email:                                                   │
+│       ├─ To: customer email                                                 │
+│       ├─ Subject: "Your Healthcare AI Agent License Key"                    │
+│       ├─ Body: License key + download link                                  │
+│       └─ Via: Resend (or log to console)                                    │
+│                                                                              │
+│  RESPONSE: { received: true } (HTTP 200)                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    REDIRECT TO SUCCESS PAGE                                 │
+│                  /order-success?session_id=cs_live_...                      │
+│                                                                              │
+│  Client-side:                                                                │
+│  ✓ After Stripe checkout completes, user redirected here                   │
+│  ✓ Page fetches: GET /api/orders/session/{sessionId}                       │
+│  ✓ Waits 2 seconds for webhook to process                                  │
+│  ✓ Displays:                                                                 │
+│    ├─ "✓ Payment Successful!"                                               │
+│    ├─ "Your product: Healthcare AI Agent"                                   │
+│    ├─ "License key: HEALTHCARE-A9F2E1D8-..."                                │
+│    ├─ "Check your email for download instructions"                          │
+│    └─ [Download] [View Docs] buttons                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ADMIN DASHBOARD                                          │
+│                        /admin/orders                                        │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Total Orders: 1    Completed: 1    Revenue: $499.00                 │   │
+│  ├─────────────────────────────────────────────────────────────────────┤   │
+│  │ Date        │ Customer    │ Product       │ Amount │ Status    │ Key   │
+│  ├─────────────────────────────────────────────────────────────────────┤   │
+│  │ Feb 12 2026 │ John Doe    │ Healthcare AI │ $499   │ completed │ H... │
+│  │             │ john@ex.com │ Agent         │        │           │       │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+
+DATABASE SCHEMA
+================================================================================
+
+Table: orders
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Column          │ Type      │ Notes                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ id              │ String    │ Primary key (unique identifier)                │
+│ stripeSessionId │ String    │ Unique - from Stripe checkout session         │
+│ stripePaymentId │ String    │ Payment intent ID from Stripe                 │
+│ email           │ String    │ Customer email address                        │
+│ product         │ String    │ Product name (e.g., "Healthcare AI Agent")    │
+│ productId       │ String    │ Internal ID (e.g., "healthcare")              │
+│ price           │ Integer   │ Price in cents (e.g., 49900 = $499)          │
+│ status          │ String    │ pending / completed / failed                  │
+│ licenseKey      │ String    │ Unique - generated on payment success         │
+│ customerName    │ String    │ Optional - from checkout                      │
+│ createdAt       │ DateTime  │ Order creation timestamp                      │
+│ updatedAt       │ DateTime  │ Last update timestamp                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Table: webhook_logs
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Column    │ Type    │ Notes                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ id        │ String  │ Primary key                                         │
+│ event     │ String  │ Webhook event type (e.g., "checkout.session...")   │
+│ data      │ String  │ JSON stringified webhook data                       │
+│ processed │ Boolean │ Whether event has been processed                    │
+│ createdAt │ DateTime│ Webhook received timestamp                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Database: SQLite
+Location: prisma/dev.db
+ORM: Prisma v6
+
+================================================================================
+
+API ENDPOINT ARCHITECTURE
+================================================================================
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          CLIENT-FACING ENDPOINTS                            │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  POST /api/checkout                                                         │
+│  ├─ Input: { productId, email, customerName }                               │
+│  ├─ Process:                                                                 │
+│  │  ├─ Validate product exists                                              │
+│  │  ├─ Create Stripe session                                                │
+│  │  └─ Save order to database                                               │
+│  └─ Response: { sessionId, orderId, url }                                   │
+│                                                                              │
+│  GET /api/orders/{id}?license={key}                                        │
+│  ├─ Input: order ID, optional license key                                  │
+│  ├─ Process: Retrieve order, verify license if provided                     │
+│  └─ Response: { id, product, status, licenseKey, ... }                     │
+│                                                                              │
+│  GET /api/orders/session/{sessionId}                                       │
+│  ├─ Input: Stripe session ID                                               │
+│  ├─ Process: Find order by session ID                                      │
+│  └─ Response: { id, product, status, licenseKey, ... }                     │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          STRIPE WEBHOOK ENDPOINT                            │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  POST /api/webhooks/stripe                                                  │
+│  ├─ Headers: stripe-signature (for verification)                            │
+│  ├─ Process:                                                                 │
+│  │  ├─ Verify signature using secret                                        │
+│  │  ├─ Parse event type                                                     │
+│  │  ├─ Log event                                                             │
+│  │  ├─ If checkout.session.completed:                                       │
+│  │  │  ├─ Find order                                                        │
+│  │  │  ├─ Generate license key                                              │
+│  │  │  ├─ Update database                                                   │
+│  │  │  └─ Send email                                                        │
+│  │  └─ Return success                                                        │
+│  └─ Response: { received: true }                                           │
+│                                                                              │
+│  Called by: Stripe servers (not user)                                       │
+│  Security: Signature verified, event logged                                 │
+│  Async: Runs independently of user request                                  │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          ADMIN ENDPOINTS                                    │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  GET /api/admin/orders?status=completed                                    │
+│  ├─ Input: Optional status filter (all, pending, completed, failed)        │
+│  ├─ Process: Fetch orders from database                                    │
+│  └─ Response: [ { id, email, product, price, status, ... }, ... ]         │
+│                                                                              │
+│  GET /admin/orders                                                          │
+│  ├─ UI: Admin dashboard component                                          │
+│  ├─ Shows: Orders list, revenue, filters                                   │
+│  └─ Features: Real-time updates, status filters, export                    │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+
+ENVIRONMENT VARIABLES
+================================================================================
+
+.env.local configuration:
+
+PUBLIC (Safe to expose in browser):
+├─ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+│  └─ pk_live_51SiSCG2QA6Fykigv... (your key)
+│
+└─ NEXT_PUBLIC_APP_URL
+   └─ https://yourdomain.com (or http://localhost:3000)
+
+PRIVATE (Server-side only, never expose):
+├─ STRIPE_SECRET_KEY
+│  └─ sk_live_... (MUST KEEP PRIVATE)
+│
+├─ STRIPE_WEBHOOK_SECRET
+│  └─ whsec_... (webhook signing secret)
+│
+├─ DATABASE_URL
+│  └─ file:./prisma/dev.db (SQLite)
+│
+└─ RESEND_API_KEY (optional, for email)
+   └─ re_... (or leave empty for console)
+
+================================================================================
+
+SECURITY FLOW
+================================================================================
+
+1. CLIENT REQUEST
+   ├─ User enters email
+   └─ CheckoutButton sends POST /api/checkout
+
+2. SERVER VALIDATION
+   ├─ Validate product exists
+   ├─ Validate email format
+   └─ Create order in database (status: pending)
+
+3. STRIPE INTEGRATION
+   ├─ Create Stripe session with product details
+   ├─ Stripe URL returned to client
+   └─ User redirected to Stripe.com
+
+4. STRIPE PAYMENT
+   ├─ Payment processed on Stripe servers
+   ├─ PCI compliance handled by Stripe
+   └─ Payment success/failure determined
+
+5. WEBHOOK VERIFICATION
+   ├─ Stripe sends webhook to your server
+   ├─ Signature verified using STRIPE_WEBHOOK_SECRET
+   ├─ If verification fails: REJECT (400)
+   └─ If verification passes: PROCESS
+
+6. LICENSE GENERATION
+   ├─ Generate unique license key
+   ├─ Store in database
+   └─ Log event
+
+7. EMAIL DELIVERY
+   ├─ Send license key to customer email
+   ├─ Include download link
+   └─ Log email sent
+
+================================================================================
+
+DEPLOYMENT ARCHITECTURE
+================================================================================
+
+DEVELOPMENT (Local)
+└─ http://localhost:3000
+   ├─ npm run dev
+   ├─ stripe listen --forward-to localhost:3000/api/webhooks/stripe
+   ├─ SQLite: file:./prisma/dev.db
+   ├─ Stripe: Test mode (pk_test_, sk_test_)
+   └─ Email: Console logs
+
+PRODUCTION (Your Domain)
+└─ https://yourdomain.com
+   ├─ npm run build && npm start
+   ├─ Webhook: https://yourdomain.com/api/webhooks/stripe
+   ├─ Database: SQLite or external (your choice)
+   ├─ Stripe: Live mode (pk_live_, sk_live_)
+   └─ Email: Resend or SendGrid
+
+================================================================================
+
+MONITORING & LOGGING
+================================================================================
+
+Webhook Logs
+└─ Table: webhook_logs
+   ├─ Every webhook event logged
+   ├─ Includes event type + data
+   ├─ Timestamp for troubleshooting
+   └─ Query: SELECT * FROM webhook_logs
+
+Order Audit Trail
+└─ Table: orders
+   ├─ createdAt: when order was created
+   ├─ updatedAt: when order was last updated
+   ├─ status: current status
+   └─ Searchable by email, product, date range
+
+Admin Dashboard
+└─ /admin/orders
+   ├─ Real-time order list
+   ├─ Revenue calculation
+   ├─ Status filtering
+   └─ License key visibility
+
+Error Logging
+└─ Server logs (console in development)
+   ├─ Checkout errors
+   ├─ Webhook errors
+   ├─ Database errors
+   └─ Email errors
+
+================================================================================
+
+END OF ARCHITECTURE DIAGRAM
+================================================================================

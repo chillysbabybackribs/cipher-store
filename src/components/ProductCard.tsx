@@ -1,11 +1,7 @@
-"use client";
-
 import { Product } from "@/data/products";
 import { ArrowRight, Check, Eye } from "./Icons";
-import { useState } from "react";
 
 export default function ProductCard({ product }: { product: Product }) {
-  const [expanded, setExpanded] = useState(false);
 
   const statusLabel = {
     available: "Available",
@@ -20,7 +16,7 @@ export default function ProductCard({ product }: { product: Product }) {
   };
 
   return (
-    <div className="min-w-[340px] sm:min-w-[380px] max-w-[400px] border border-border bg-surface card-hover glow-hover flex flex-col">
+    <div className="min-w-[340px] sm:min-w-[380px] max-w-[400px] w-full h-[520px] border border-border bg-surface card-hover glow-hover flex flex-col">
       {/* Top bar */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-border-subtle">
         <div className="flex items-center gap-2">
@@ -40,9 +36,9 @@ export default function ProductCard({ product }: { product: Product }) {
       </div>
 
       {/* Content */}
-      <div className="px-5 py-5 flex-1 flex flex-col">
+      <div className="px-5 py-5 flex-1 flex flex-col overflow-hidden">
         {/* Title block */}
-        <div className="mb-4">
+        <div className="mb-4 shrink-0">
           <h3 className="text-base font-semibold text-text-primary leading-snug">
             {product.title}
           </h3>
@@ -52,25 +48,22 @@ export default function ProductCard({ product }: { product: Product }) {
         </div>
 
         {/* Description */}
-        <p className="text-sm text-text-secondary leading-relaxed mb-5">
+        <p className="text-sm text-text-secondary leading-relaxed mb-5 line-clamp-3 shrink-0">
           {product.description}
         </p>
 
-        {/* Features preview */}
-        <div className="space-y-2 mb-5">
-          {product.features.slice(0, expanded ? undefined : 3).map((f, i) => (
+        {/* Features preview — fixed 3 shown, no expand toggle to prevent layout shift */}
+        <div className="space-y-2 mb-5 shrink-0">
+          {product.features.slice(0, 3).map((f, i) => (
             <div key={i} className="flex items-start gap-2">
               <Check className="w-3.5 h-3.5 text-text-muted mt-0.5 shrink-0" />
               <span className="text-xs text-text-secondary">{f}</span>
             </div>
           ))}
           {product.features.length > 3 && (
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="text-xs text-accent hover:text-accent-dim transition-colors flex items-center gap-1 mt-1"
-            >
-              {expanded ? "Show less" : `+${product.features.length - 3} more features`}
-            </button>
+            <p className="text-xs text-text-muted mt-1">
+              +{product.features.length - 3} more features
+            </p>
           )}
         </div>
 
@@ -78,7 +71,7 @@ export default function ProductCard({ product }: { product: Product }) {
         <div className="flex-1" />
 
         {/* Includes */}
-        <div className="border-t border-border-subtle pt-4 mb-5">
+        <div className="border-t border-border-subtle pt-4 mb-5 shrink-0">
           <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted mb-2">
             Includes
           </p>
